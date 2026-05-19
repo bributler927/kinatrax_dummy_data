@@ -47,8 +47,10 @@ def load_data():
 '''
 SECTIONS TO MAP TO APIs LATER
 '''
-# setting up filtering
+# setting up filtering and sorting
 def get_filtered_pitches(
+    sort_by=None,
+    sort_order="asc",
     pitch_type=None,
     min_speed=None,
     max_speed=None,
@@ -64,6 +66,22 @@ def get_filtered_pitches(
 ):
     df = load_data()
 
+    if sort_by:
+        if sort_order == "asc": 
+            ascending = sort_order == "asc"
+
+            df = df.sort_values(
+                by=sort_by,
+                ascending=ascending
+            )
+        elif sort_order == "desc":
+            descending = sort_order == "desc"
+
+            df = df.sort_values(
+                by=sort_by,
+                ascending=descending
+            )
+
     if pitch_type:
         df = df[df["pitch_type"] == pitch_type]
 
@@ -72,13 +90,13 @@ def get_filtered_pitches(
 
     if max_speed is not None:
         df = df[df["end_speed"] <= max_speed]
-    
+
     if date:
         df = df[df["Date"] == date]
 
     if year:
         df = df[df["Date"].str[:4] == year]
-    
+
     if pitch_result:
         df = df[df["pitch_call"] == pitch_result]
 
@@ -87,7 +105,7 @@ def get_filtered_pitches(
 
     if batter_side:
         df = df[df["batterSide"] == batter_side]
-    
+
     if pitcher_side:
         df = df[df["pitcherSide"] == pitcher_side]
 
@@ -96,7 +114,7 @@ def get_filtered_pitches(
 
     if strikes:
         df = df[df["strikes"] == strikes]
-    
+ 
     if outs: 
         df = df[df["outs"] == outs]
 
@@ -104,13 +122,11 @@ def get_filtered_pitches(
 
     return df.to_dict(orient="records")
 
-#get_filtered_pitches(balls=1, strikes=2)
+#get_filtered_pitches(balls=1, strikes=2, sort_order="desc", sort_by="end_speed")
 
 def get_pitch_filtering_categories():
-    # Will later use this to providing filtering options
+    # will later use this to providing filtering options
     df = load_data()
-
-    
 
     pitch_calls = df["pitch_call"].value_counts().to_dict()
     pitch_types = df["pitch_type"].value_counts().to_dict()
@@ -120,13 +136,39 @@ def get_pitch_filtering_categories():
     years = df["Date"].str[:4].value_counts().to_dict()
     dates = df["Date"].value_counts().to_dict()
 
-    print(dates)
+    # get all columns with numeric data types
+    df_numeric = df.select_dtypes(include=['number']).columns.tolist()
+    print(df_numeric)
+
+    return (
+        pitch_calls,
+        pitch_types,
+        batter_ids,
+        batter_sides,
+        pitcher_sides,
+        years,
+        dates,
+    )
 
 get_pitch_filtering_categories()
+
+
+'''
+ Categories to plot:
+    - pfx_x = horizontal movement
+    - pfx_z = vertical movement
+    - x0 = horizontal release point
+    - y0 = release distance from plate
+    - z0 = vertical release point
+    - plate_x = horizontal plate crossing
+    - plate_z = vertical plate crosing
+'''
 
 '''
  SECTION: API ENDPOINTS
 '''
+
+# No pagination reqiured because it's a small dataset?
 @app.get("/")
 def root():
     return {"message": "Python analytics backend is running"}
@@ -147,3 +189,39 @@ def get_summary():
     print(summary["pitch_type_counts"])
     
     return summary
+
+#get_summary()
+
+@app.get("/pitches")
+def pitches(
+    pitch_type: str | None = None,
+    sort_by: str | None = None,
+    sort_order: str | None = None,
+    min_speed: int | None = None,
+    max_speed: int | None = None,
+    date: str | None = None,
+    year: str | None = None,
+    pitch_result: str | None = None,
+    inning: int | None = None,
+    batter_side: str | None = None,
+    pitcher_side: str | None = None,
+    balls: int | None = None,
+    strikes: int | None = None,
+    outs: int | None = None
+):
+    return get_filtered_pitches(
+        sort_by=sort_by,
+        sort_order=sort_order,
+        pitch_type=pitch_type,
+        min_speed=min_speed,
+        max_speed=max_speed,
+        date=date,
+        year=year,
+        pitch_result=pitch_result,
+        inning=inning,
+        batter_side=batter_side,
+        pitcher_side=pitcher_side,
+        balls=balls,
+        strikes=strikes,
+        outs=outs
+    )
