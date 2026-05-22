@@ -1,13 +1,89 @@
 import { useEffect, useState } from "react";
+import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
 import "./App.css";
 
 const API_BASE_URL = "http://localhost:8000";
+const STEP = 0.1;
+const ROWS_PER_PAGE = 25;
+
+const TABLE_COLUMNS = [
+  {
+    key: "Date",
+    label: "Date",
+    sortable: false,
+  },
+  {
+    key: "pitcher_id",
+    label: "Pitcher",
+    sortable: false,
+  },
+  {
+    key: "batter_id",
+    label: "Batter",
+    sortable: false,
+  },
+  {
+    key: "inning",
+    label: "Inning",
+    sortable: true,
+  },
+  {
+    key: "pitch_type",
+    label: "Pitch Type",
+    sortable: false,
+  },
+  {
+    key: "pitch_call",
+    label: "Result",
+    sortable: false,
+  },
+  {
+    key: "count",
+    label: "Count",
+    sortable: false,
+  },
+  {
+    key: "outs",
+    label: "Outs",
+    sortable: true,
+  },
+  {
+    key: "start_speed",
+    label: "Start Speed",
+    sortable: true,
+  },
+  {
+    key: "spin_rate",
+    label: "Spin Rate",
+    sortable: true,
+  },
+];
+
+function formatTableValue(pitch, key) {
+  if (key === "count") {
+    return `${pitch.balls ?? "—"}-${pitch.strikes ?? "—"}`;
+  }
+
+  const value = pitch[key];
+
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  if (key === "start_speed") {
+    return `${Number(value).toFixed(1)} mph`;
+  }
+
+  if (key === "spin_rate") {
+    return `${Math.round(Number(value))} rpm`;
+  }
+
+  return value;
+}
 
 const DEFAULT_FILTERS = {
   pitch_type: "",
   pitch_result: "",
-  min_speed: "",
-  max_speed: "",
   date: "",
   year: "",
   inning: "",
@@ -16,6 +92,8 @@ const DEFAULT_FILTERS = {
   balls: "",
   strikes: "",
   outs: "",
+  min_speed: "",
+  max_speed: "",
   sort_by: "Date",
   sort_order: "desc",
 };
@@ -39,14 +117,14 @@ const DEFAULT_FILTER_OPTIONS = {
 
 const SORT_OPTIONS = [
   { value: "Date", label: "Date" },
-  { value: "end_speed", label: "Velocity" },
+  { value: "start_speed", label: "Speed" },
   { value: "spin_rate", label: "Spin Rate" },
   { value: "pitch_type", label: "Pitch Type" },
   { value: "pitch_call", label: "Pitch Result" },
-  { value: "horizontal_break", label: "Horizontal Break" },
-  { value: "induced_vertical_break", label: "Induced Vertical Break" },
-  { value: "Arm_Slot_Updated_X", label: "Arm Slot" },
-  { value: "Max_Elb_Var_Torque_X", label: "Max Elbow Torque" },
+  { value: "inning", label: "Inning" },
+  { value: "balls", label: "Balls" },
+  { value: "strikes", label: "Strikes" },
+  { value: "outs", label: "Outs" },
 ];
 
 const SORT_ORDER_OPTIONS = [
@@ -54,87 +132,23 @@ const SORT_ORDER_OPTIONS = [
   { value: "desc", label: "Descending" },
 ];
 
-const TABLE_COLUMNS = [
-  { key: "Date", label: "Date" },
-  { key: "pitcher_id", label: "Pitcher" },
-  { key: "batter_id", label: "Batter" },
-  { key: "inning", label: "Inning" },
-  { key: "pitch_number", label: "Pitch #" },
-  { key: "count", label: "Count" },
-  { key: "outs", label: "Outs" },
-  { key: "pitch_type", label: "Type" },
-  { key: "pitch_call", label: "Result" },
-  {
-    key: "end_speed",
-    label: "Velocity",
-    format: (value) => formatWithUnit(value, "mph", 1),
-  },
-  {
-    key: "spin_rate",
-    label: "Spin",
-    format: (value) => formatWithUnit(value, "rpm", 0),
-  },
-  {
-    key: "horizontal_break",
-    label: "H. Break",
-    format: (value) => formatNumber(value, 1),
-  },
-  {
-    key: "induced_vertical_break",
-    label: "IVB",
-    format: (value) => formatNumber(value, 1),
-  },
-  { key: "plate_location", label: "Plate X/Z" },
-  {
-    key: "Arm_Slot_Updated_X",
-    label: "Arm Slot",
-    format: (value) => formatNumber(value, 1),
-  },
-  {
-    key: "Max_Elb_Var_Torque_X",
-    label: "Max Elbow Torque",
-    format: (value) => formatNumber(value, 1),
-  },
-];
+async function fetchJson(url) {
+  const response = await fetch(url);
 
-function formatNumber(value, decimals = 1) {
-  if (value === null || value === undefined || value === "") {
-    return "—";
+  if (!response.ok) {
+    throw new Error(`${url} failed with status ${response.status}`);
+  }
+
+  return response.json();
+}
+
+function getNumericFilterValue(value, fallback) {
+  if (value === "" || value === null || value === undefined) {
+    return fallback;
   }
 
   const number = Number(value);
-
-  if (!Number.isFinite(number)) {
-    return "—";
-  }
-
-  return number.toFixed(decimals);
-}
-
-function formatWithUnit(value, unit, decimals = 1) {
-  const formatted = formatNumber(value, decimals);
-  return formatted === "—" ? "—" : `${formatted} ${unit}`;
-}
-
-function getTableCellValue(pitch, column) {
-  if (column.key === "count") {
-    const balls = pitch.balls ?? "—";
-    const strikes = pitch.strikes ?? "—";
-    return `${balls}-${strikes}`;
-  }
-
-  if (column.key === "plate_location") {
-    return `${formatNumber(pitch.plate_x, 2)}, ${formatNumber(
-      pitch.plate_z,
-      2
-    )}`;
-  }
-
-  if (column.format) {
-    return column.format(pitch[column.key], pitch);
-  }
-
-  return pitch[column.key] ?? "—";
+  return Number.isFinite(number) ? number : fallback;
 }
 
 function buildQueryString(filters) {
@@ -182,7 +196,213 @@ function SelectFilter({
   );
 }
 
-function App() {
+function SpeedDoubleSlider({
+  min,
+  max,
+  minValue,
+  maxValue,
+  onMinChange,
+  onMaxChange,
+}) {
+  const range = max - min;
+  const minPercent = range === 0 ? 0 : ((minValue - min) / range) * 100;
+  const maxPercent = range === 0 ? 100 : ((maxValue - min) / range) * 100;
+
+  return (
+    <div className="speed-filter-card inline-speed-filter">
+      <div className="speed-filter-header">
+        <div>
+          <h3>Speed Range</h3>
+          <p>Filter pitches by start speed.</p>
+        </div>
+
+        <strong>
+          {minValue.toFixed(1)}-{maxValue.toFixed(1)} mph
+        </strong>
+      </div>
+
+      <div className="double-slider">
+        <div className="double-slider-track" />
+
+        <div
+          className="double-slider-range"
+          style={{
+            left: `${minPercent}%`,
+            width: `${maxPercent - minPercent}%`,
+          }}
+        />
+
+        <input
+          className="double-slider-input min-slider"
+          type="range"
+          min={min}
+          max={max}
+          step={STEP}
+          value={minValue}
+          onChange={(event) => onMinChange(event.target.value)}
+        />
+
+        <input
+          className="double-slider-input max-slider"
+          type="range"
+          min={min}
+          max={max}
+          step={STEP}
+          value={maxValue}
+          onChange={(event) => onMaxChange(event.target.value)}
+        />
+      </div>
+
+      <div className="double-slider-labels">
+        <span>{min.toFixed(1)} mph</span>
+        <span>{max.toFixed(1)} mph</span>
+      </div>
+    </div>
+  );
+}
+
+function formatDetailLabel(key) {
+  return key
+    .replaceAll("_", " ")
+    .replaceAll("MER", "MER")
+    .replaceAll("BR", "BR")
+    .replaceAll("FC", "FC")
+    .replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function formatDetailValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  if (typeof value === "number") {
+    return Number.isInteger(value) ? value : value.toFixed(2);
+  }
+
+  return String(value);
+}
+
+function DetailSection({ title, data }) {
+  const entries = Object.entries(data || {}).filter(
+    ([, value]) => value !== null && value !== undefined && value !== ""
+  );
+
+  return (
+    <section className="detail-section">
+      <h2>{title}</h2>
+
+      {entries.length === 0 ? (
+        <p className="subtle-text">No data available.</p>
+      ) : (
+        <div className="detail-grid">
+          {entries.map(([key, value]) => (
+            <div className="detail-card" key={key}>
+              <span>{formatDetailLabel(key)}</span>
+              <strong>{formatDetailValue(value)}</strong>
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+function PitchDetailPage() {
+  const { pitchUid } = useParams();
+  const [pitchDetail, setPitchDetail] = useState(null);
+  const [loadingDetail, setLoadingDetail] = useState(true);
+  const [detailError, setDetailError] = useState("");
+
+  useEffect(() => {
+    async function loadPitchDetail() {
+      setLoadingDetail(true);
+      setDetailError("");
+
+      try {
+        const data = await fetchJson(`${API_BASE_URL}/api/pitches/${pitchUid}`);
+        setPitchDetail(data);
+      } catch (err) {
+        setDetailError(err.message);
+      } finally {
+        setLoadingDetail(false);
+      }
+    }
+
+    loadPitchDetail();
+  }, [pitchUid]);
+
+  if (loadingDetail) {
+    return (
+      <main className="dashboard">
+        <Link className="back-link" to="/">
+          ← Back to dashboard
+        </Link>
+
+        <p>Loading pitch details...</p>
+      </main>
+    );
+  }
+
+  if (detailError) {
+    return (
+      <main className="dashboard">
+        <Link className="back-link" to="/">
+          ← Back to dashboard
+        </Link>
+
+        <p className="error-message">{detailError}</p>
+      </main>
+    );
+  }
+
+  if (!pitchDetail) {
+    return (
+      <main className="dashboard">
+        <Link className="back-link" to="/">
+          ← Back to dashboard
+        </Link>
+
+        <p>No pitch detail found.</p>
+      </main>
+    );
+  }
+
+  const pitch = pitchDetail.pitch || {};
+
+  return (
+    <main className="dashboard">
+      <Link className="back-link" to="/">
+        ← Back to dashboard
+      </Link>
+
+      <section className="pitch-detail-hero">
+        <div>
+          <p className="subtle-text">Pitch Detail</p>
+          <h1>{pitch.pitch_type ?? "Pitch"} — {pitchDetail.pitch_uid}</h1>
+          <p>
+            {pitch.Date ?? "Unknown date"} · Pitcher {pitch.pitcher_id ?? "—"} ·
+            Batter {pitch.batter_id ?? "—"}
+          </p>
+        </div>
+
+        <div className="pitch-detail-result">
+          <span>{pitch.pitch_call ?? "—"}</span>
+          <strong>{pitch.start_speed ?? "—"} mph</strong>
+        </div>
+      </section>
+
+      <DetailSection title="Pitch Information" data={pitchDetail.pitch} />
+
+      <DetailSection title="Movement / Pitch Tracking" data={pitchDetail.movement} />
+
+      <DetailSection title="Batted Ball / Result" data={pitchDetail.batted_ball} />
+
+      <DetailSection title="Biomechanical Metrics" data={pitchDetail.biomechanics} />
+    </main>
+  );
+}
+
+function DashboardPage() {
   const [activeTab, setActiveTab] = useState("summary");
   const [summary, setSummary] = useState(null);
   const [pitches, setPitches] = useState([]);
@@ -190,40 +410,24 @@ function App() {
   const [filterOptions, setFilterOptions] = useState(DEFAULT_FILTER_OPTIONS);
   const [loadingPitches, setLoadingPitches] = useState(false);
   const [error, setError] = useState("");
+  const [visibleRowCount, setVisibleRowCount] = useState(ROWS_PER_PAGE);
 
-  async function fetchSummary() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/summary`);
+  const navigate = useNavigate();
 
-      if (!response.ok) {
-        throw new Error(`Summary request failed: ${response.status}`);
-      }
+  const [sortConfig, setSortConfig] = useState({
+    sort_by: DEFAULT_FILTERS.sort_by,
+    sort_order: DEFAULT_FILTERS.sort_order,
+  });
 
-      const data = await response.json();
-      setSummary(data);
-    } catch (err) {
-      setError(err.message);
-    }
-  }
+  const speedMin = Math.floor(filterOptions.speed_range?.min ?? 70);
+  const speedMax = Math.ceil(filterOptions.speed_range?.max ?? 100);
 
-  async function fetchFilterOptions() {
-    try {
-      const response = await fetch(`${API_BASE_URL}/api/filter-options`);
+  const currentMinSpeed = getNumericFilterValue(filters.min_speed, speedMin);
+  const currentMaxSpeed = getNumericFilterValue(filters.max_speed, speedMax);
 
-      if (!response.ok) {
-        throw new Error(`Filter options request failed: ${response.status}`);
-      }
-
-      const data = await response.json();
-
-      setFilterOptions({
-        ...DEFAULT_FILTER_OPTIONS,
-        ...data,
-      });
-    } catch (err) {
-      setError(err.message);
-    }
-  }
+  const visiblePitches = pitches.slice(0, visibleRowCount);
+  const hasMoreRows = visibleRowCount < pitches.length;
+  const rowsRemaining = pitches.length - visibleRowCount;
 
   async function fetchPitches(currentFilters = filters) {
     setLoadingPitches(true);
@@ -235,14 +439,9 @@ function App() {
         ? `${API_BASE_URL}/api/pitches?${queryString}`
         : `${API_BASE_URL}/api/pitches`;
 
-      const response = await fetch(url);
-
-      if (!response.ok) {
-        throw new Error(`Pitch table request failed: ${response.status}`);
-      }
-
-      const data = await response.json();
+      const data = await fetchJson(url);
       setPitches(data);
+      setVisibleRowCount(ROWS_PER_PAGE);
     } catch (err) {
       setError(err.message);
     } finally {
@@ -250,10 +449,66 @@ function App() {
     }
   }
 
+  function getSortIndicator(columnKey) {
+    if (sortConfig.sort_by !== columnKey) {
+      return "↕";
+    }
+  
+    return sortConfig.sort_order === "asc" ? "↑" : "↓";
+  }
+  
+  function handleColumnSort(columnKey) {
+    const nextSortOrder =
+      sortConfig.sort_by === columnKey && sortConfig.sort_order === "asc"
+        ? "desc"
+        : "asc";
+  
+    const nextSortConfig = {
+      sort_by: columnKey,
+      sort_order: nextSortOrder,
+    };
+  
+    const nextFilters = {
+      ...filters,
+      ...nextSortConfig,
+    };
+  
+    setSortConfig(nextSortConfig);
+    setFilters(nextFilters);
+    fetchPitches(nextFilters);
+  }
+
   useEffect(() => {
-    fetchSummary();
-    fetchFilterOptions();
-    fetchPitches(DEFAULT_FILTERS);
+    async function loadDashboardData() {
+      try {
+        const summaryData = await fetchJson(`${API_BASE_URL}/api/summary`);
+        setSummary(summaryData);
+
+        const filterOptionsData = await fetchJson(
+          `${API_BASE_URL}/api/filter-options`
+        );
+
+        const mergedFilterOptions = {
+          ...DEFAULT_FILTER_OPTIONS,
+          ...filterOptionsData,
+        };
+
+        setFilterOptions(mergedFilterOptions);
+
+        const startingFilters = {
+          ...DEFAULT_FILTERS,
+          min_speed: String(mergedFilterOptions.speed_range?.min ?? 70),
+          max_speed: String(mergedFilterOptions.speed_range?.max ?? 100),
+        };
+
+        setFilters(startingFilters);
+        fetchPitches(startingFilters);
+      } catch (err) {
+        setError(err.message);
+      }
+    }
+
+    loadDashboardData();
   }, []);
 
   function handleFilterChange(event) {
@@ -265,6 +520,48 @@ function App() {
     }));
   }
 
+  function handleMinSpeedChange(rawValue) {
+    const nextValue = Number(rawValue);
+
+    setFilters((previousFilters) => {
+      const previousMax = getNumericFilterValue(
+        previousFilters.max_speed,
+        speedMax
+      );
+
+      const cappedMin = Math.min(
+        Math.max(nextValue, speedMin),
+        previousMax - STEP
+      );
+
+      return {
+        ...previousFilters,
+        min_speed: String(Number(cappedMin.toFixed(1))),
+      };
+    });
+  }
+
+  function handleMaxSpeedChange(rawValue) {
+    const nextValue = Number(rawValue);
+
+    setFilters((previousFilters) => {
+      const previousMin = getNumericFilterValue(
+        previousFilters.min_speed,
+        speedMin
+      );
+
+      const cappedMax = Math.max(
+        Math.min(nextValue, speedMax),
+        previousMin + STEP
+      );
+
+      return {
+        ...previousFilters,
+        max_speed: String(Number(cappedMax.toFixed(1))),
+      };
+    });
+  }
+
   function handleApplyFilters(event) {
     event.preventDefault();
     fetchPitches(filters);
@@ -272,10 +569,23 @@ function App() {
   }
 
   function handleResetFilters() {
-    const resetFilters = { ...DEFAULT_FILTERS };
+    const resetFilters = {
+      ...DEFAULT_FILTERS,
+      min_speed: String(speedMin),
+      max_speed: String(speedMax),
+    };
+  
+    setSortConfig({
+      sort_by: DEFAULT_FILTERS.sort_by,
+      sort_order: DEFAULT_FILTERS.sort_order,
+    });
+  
     setFilters(resetFilters);
     fetchPitches(resetFilters);
   }
+
+  const averageSpeed =
+    summary?.average_speed ?? summary?.average_start_speed ?? summary?.average_end_speed;
 
   return (
     <main className="dashboard">
@@ -285,6 +595,7 @@ function App() {
 
       <div className="tabs">
         <button
+          type="button"
           className={activeTab === "summary" ? "tab-button active" : "tab-button"}
           onClick={() => setActiveTab("summary")}
         >
@@ -292,6 +603,7 @@ function App() {
         </button>
 
         <button
+          type="button"
           className={activeTab === "table" ? "tab-button active" : "tab-button"}
           onClick={() => setActiveTab("table")}
         >
@@ -314,8 +626,8 @@ function App() {
                 </div>
 
                 <div className="summary-card">
-                  <span className="summary-label">Average Velocity</span>
-                  <strong>{summary.average_end_speed} mph</strong>
+                  <span className="summary-label">Average Speed</span>
+                  <strong>{averageSpeed} mph</strong>
                 </div>
 
                 <div className="summary-card">
@@ -349,7 +661,7 @@ function App() {
             <div>
               <h2>Pitch Table</h2>
               <p className="subtle-text">
-                Filtered view of the most important pitch-level metrics.
+                Filter pitch-level data using the controls below.
               </p>
             </div>
 
@@ -375,30 +687,6 @@ function App() {
                 options={filterOptions.pitch_results}
                 onChange={handleFilterChange}
               />
-
-              <label className="filter-control">
-                <span>Min Velocity</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  name="min_speed"
-                  value={filters.min_speed}
-                  onChange={handleFilterChange}
-                  placeholder="Example: 85"
-                />
-              </label>
-
-              <label className="filter-control">
-                <span>Max Velocity</span>
-                <input
-                  type="number"
-                  step="0.1"
-                  name="max_speed"
-                  value={filters.max_speed}
-                  onChange={handleFilterChange}
-                  placeholder="Example: 95"
-                />
-              </label>
 
               <SelectFilter
                 label="Date"
@@ -481,6 +769,15 @@ function App() {
                 onChange={handleFilterChange}
                 includeAll={false}
               />
+
+              <SpeedDoubleSlider
+                min={speedMin}
+                max={speedMax}
+                minValue={currentMinSpeed}
+                maxValue={currentMaxSpeed}
+                onMinChange={handleMinSpeedChange}
+                onMaxChange={handleMaxSpeedChange}
+              />
             </div>
 
             <div className="filter-actions">
@@ -500,44 +797,110 @@ function App() {
 
           <div className="table-wrapper">
             <table className="pitch-table">
-              <thead>
-                <tr>
-                  {TABLE_COLUMNS.map((column) => (
-                    <th key={column.key}>{column.label}</th>
-                  ))}
-                </tr>
-              </thead>
+            <thead>
+              <tr>
+                {TABLE_COLUMNS.map((column) => (
+                  <th key={column.key}>
+                    {column.sortable ? (
+                      <button
+                        type="button"
+                        className="sortable-header"
+                        onClick={() => handleColumnSort(column.key)}
+                      >
+                        <span>{column.label}</span>
+                        <span className="sort-indicator">
+                          {getSortIndicator(column.key)}
+                        </span>
+                      </button>
+                    ) : (
+                      column.label
+                    )}
+                  </th>
+                ))}
+              </tr>
+            </thead>
 
-              <tbody>
-                {loadingPitches ? (
-                  <tr>
-                    <td colSpan={TABLE_COLUMNS.length} className="empty-message">
-                      Loading pitches...
-                    </td>
+            <tbody>
+              {loadingPitches ? (
+                <tr>
+                  <td colSpan={TABLE_COLUMNS.length} className="empty-message">
+                    Loading pitches...
+                  </td>
+                </tr>
+              ) : pitches.length === 0 ? (
+                <tr>
+                  <td colSpan={TABLE_COLUMNS.length} className="empty-message">
+                    No pitches match the selected filters.
+                  </td>
+                </tr>
+              ) : (
+                visiblePitches.map((pitch, index) => (
+                  <tr
+                    key={pitch.PitchUID ?? index}
+                    className="clickable-row"
+                    tabIndex={0}
+                    onClick={() => navigate(`/pitches/${pitch.PitchUID}`)}
+                    onKeyDown={(event) => {
+                      if (event.key === "Enter" || event.key === " ") {
+                        navigate(`/pitches/${pitch.PitchUID}`);
+                      }
+                    }}
+                  >
+                    {TABLE_COLUMNS.map((column) => (
+                      <td key={column.key}>
+                        {formatTableValue(pitch, column.key)}
+                      </td>
+                    ))}
                   </tr>
-                ) : pitches.length === 0 ? (
-                  <tr>
-                    <td colSpan={TABLE_COLUMNS.length} className="empty-message">
-                      No pitches match the selected filters.
-                    </td>
-                  </tr>
-                ) : (
-                  pitches.map((pitch, index) => (
-                    <tr key={pitch.PitchUID ?? index}>
-                      {TABLE_COLUMNS.map((column) => (
-                        <td key={column.key}>
-                          {getTableCellValue(pitch, column)}
-                        </td>
-                      ))}
-                    </tr>
-                  ))
-                )}
-              </tbody>
+                ))
+              )}
+            </tbody>
             </table>
+          </div>
+
+          <div className="pagination-controls">
+            <p>
+              Showing {Math.min(visibleRowCount, pitches.length)} of {pitches.length} pitches
+            </p>
+
+            <div className="pagination-buttons">
+              {hasMoreRows && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() =>
+                    setVisibleRowCount((currentCount) =>
+                      Math.min(currentCount + ROWS_PER_PAGE, pitches.length)
+                    )
+                  }
+                >
+                  Show {Math.min(ROWS_PER_PAGE, rowsRemaining)} more
+                </button>
+              )}
+
+              {visibleRowCount > ROWS_PER_PAGE && (
+                <button
+                  type="button"
+                  className="secondary-button"
+                  onClick={() => setVisibleRowCount(ROWS_PER_PAGE)}
+                >
+                  Show fewer
+                </button>
+              )}
+            </div>
           </div>
         </section>
       )}
     </main>
+  );
+}
+
+function App() {
+  return (
+    <Routes>
+      <Route path="/" element={<DashboardPage />} />
+      <Route path="/pitches/:pitchUid" element={<PitchDetailPage />} />
+    </Routes>
   );
 }
 

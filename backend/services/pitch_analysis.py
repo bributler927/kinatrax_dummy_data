@@ -89,11 +89,11 @@ def get_unique_ints(df, column_name):
 
 
 def get_speed_range(df):
-    if "end_speed" not in df.columns:
+    if "start_speed" not in df.columns:
         return {"min": None, "max": None}
 
-    min_speed = df["end_speed"].min()
-    max_speed = df["end_speed"].max()
+    min_speed = df["start_speed"].min()
+    max_speed = df["start_speed"].max()
 
     return {
         "min": None if pd.isna(min_speed) else round(float(min_speed), 1),
@@ -157,10 +157,10 @@ def get_filtered_pitches(
         df = df[df["pitch_type"] == pitch_type]
 
     if min_speed is not None:
-        df = df[df["end_speed"] >= min_speed]
+        df = df[df["start_speed"] >= min_speed]
 
     if max_speed is not None:
-        df = df[df["end_speed"] <= max_speed]
+        df = df[df["start_speed"] <= max_speed]
 
     if date:
         df = df[df["Date"].astype(str) == date]
@@ -206,12 +206,142 @@ def get_filtered_pitches(
 
     return df.to_dict(orient="records")
 
+PITCH_DETAIL_FIELDS = [
+    "PitchUID",
+    "Date",
+    "game_pk",
+    "at_bat_index",
+    "inning",
+    "half_inning",
+    "pitcher_id",
+    "batter_id",
+    "pitch_number",
+    "pitch_type",
+    "pitch_call",
+    "balls",
+    "strikes",
+    "outs",
+    "start_speed",
+    "end_speed",
+    "spin_rate",
+    "pitcherSide",
+    "batterSide",
+]
+
+MOVEMENT_DETAIL_FIELDS = [
+    "pfx_x",
+    "pfx_z",
+    "x0",
+    "y0",
+    "z0",
+    "plate_x",
+    "plate_z",
+    "zone",
+    "horizontal_break",
+    "induced_vertical_break",
+    "break_length",
+    "break_angle",
+    "spin_direction",
+]
+
+BATTED_BALL_DETAIL_FIELDS = [
+    "launchSpeed",
+    "launchAngle",
+    "totalDistance",
+    "hit_trajectory",
+    "hit_hardness",
+    "hit_location",
+    "eventType",
+    "description",
+]
+
+NON_BIOMECH_FIELDS = set(
+    PITCH_DETAIL_FIELDS
+    + MOVEMENT_DETAIL_FIELDS
+    + BATTED_BALL_DETAIL_FIELDS
+    + ["timeseries"]
+)
+
+
+def pick_fields(row, fields):
+    return {
+        field: row.get(field)
+        for field in fields
+        if field in row
+    }
+
+
+def is_biomech_field(field_name):
+    if field_name in NON_BIOMECH_FIELDS:
+        return False
+
+    biomech_prefixes = (
+        "Lead_",
+        "Trail_",
+        "Pelvis_",
+        "Trunk_",
+        "Sho_",
+        "Elb_",
+        "Hip_",
+        "COM_",
+        "Hand_",
+        "Knee_",
+        "Step_",
+        "Stride_",
+        "Max_",
+        "Normalized_",
+        "Resultant_",
+        "Grounded_",
+        "Head_",
+        "Glove_",
+        "MEEV",
+        "MHV",
+        "MPRV",
+        "MSRV",
+        "MTRV",
+    )
+
+    return (
+        field_name.endswith("_X")
+        or field_name.endswith("_Predicted_X")
+        or field_name.startswith(biomech_prefixes)
+    )
+
+
+def get_pitch_detail(pitch_uid):
+    df = load_data()
+
+    matching_pitch = df[df["PitchUID"] == pitch_uid]
+
+    if matching_pitch.empty:
+        return None
+
+    matching_pitch = clean_for_json(matching_pitch)
+    row = matching_pitch.iloc[0].to_dict()
+
+    biomechanics = {
+        key: value
+        for key, value in row.items()
+        if is_biomech_field(key)
+        and value is not None
+        and value != ""
+    }
+
+    return {
+        "pitch_uid": pitch_uid,
+        "pitch": pick_fields(row, PITCH_DETAIL_FIELDS),
+        "movement": pick_fields(row, MOVEMENT_DETAIL_FIELDS),
+        "batted_ball": pick_fields(row, BATTED_BALL_DETAIL_FIELDS),
+        "biomechanics": biomechanics,
+        "timeseries": row.get("timeseries"),
+    }
+
 def get_summary():
     df = load_data()
 
     return {
         "total_pitches": len(df),
-        "average_end_speed": safe_mean(df, "end_speed"),
+        "average_speed": safe_mean(df, "start_speed"),
         "average_spin_rate": safe_mean(df, "spin_rate"),
         "pitch_type_counts": df["pitch_type"].value_counts().to_dict(),
     }
