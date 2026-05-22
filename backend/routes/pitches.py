@@ -1,11 +1,12 @@
 from fastapi import APIRouter
 from services.pitch_analysis import (
-    get_summary, 
+    get_summary,
     get_filtered_pitches,
     get_pitch_filtering_categories,
 )
 
 router = APIRouter()
+
 
 @router.get("/summary")
 def summary():
@@ -19,9 +20,9 @@ def filter_options():
 def pitches(
     pitch_type: str | None = None,
     sort_by: str | None = None,
-    sort_order: str | None = None,
-    min_speed: int | None = None,
-    max_speed: int | None = None,
+    sort_order: str = "asc",
+    min_speed: float | None = None,
+    max_speed: float | None = None,
     date: str | None = None,
     year: str | None = None,
     pitch_result: str | None = None,
@@ -30,7 +31,7 @@ def pitches(
     pitcher_side: str | None = None,
     balls: int | None = None,
     strikes: int | None = None,
-    outs: int | None = None
+    outs: int | None = None,
 ):
     return get_filtered_pitches(
         sort_by=sort_by,
@@ -46,5 +47,5 @@ def pitches(
         pitcher_side=pitcher_side,
         balls=balls,
         strikes=strikes,
-        outs=outs
+        outs=outs,
     )

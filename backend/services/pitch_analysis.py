@@ -2,6 +2,7 @@ from services.data_loader import load_data
 import numpy as np
 import pandas as pd
 
+
 TABLE_COLUMNS = [
     "PitchUID",
     "Date",
@@ -37,6 +38,7 @@ TABLE_COLUMNS = [
     "Max_Resultant_Sho_Force_X",
 ]
 
+
 def clean_for_json(df):
     """
     FastAPI cannot serialize NaN or +/- infinity.
@@ -47,6 +49,7 @@ def clean_for_json(df):
         .astype(object)
         .where(pd.notna(df), None)
     )
+
 
 def safe_mean(df, column_name):
     if column_name not in df.columns:
