@@ -5,6 +5,7 @@ PITCHES_DATA_PATH = "data/pitch_biomech_data.json"
 TIME_DATA_PATH = "data/time_series_metrics.json"
 
 
+
 def load_data():
     # Load pitch biomech table
     with open(PITCHES_DATA_PATH, "r") as f:

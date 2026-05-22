@@ -1,5 +1,9 @@
 from fastapi import APIRouter
-from services.pitch_analysis import get_summary, get_filtered_pitches
+from services.pitch_analysis import (
+    get_summary, 
+    get_filtered_pitches,
+    get_pitch_filtering_categories,
+)
 
 router = APIRouter()
 
@@ -7,7 +11,9 @@ router = APIRouter()
 def summary():
     return get_summary()
 
-#get_summary()
+@router.get("/filter-options")
+def filter_options():
+    return get_pitch_filtering_categories()
 
 @router.get("/pitches")
 def pitches(

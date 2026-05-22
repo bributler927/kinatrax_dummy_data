@@ -1,10 +1,137 @@
 from services.data_loader import load_data
 import numpy as np
+import pandas as pd
+
+TABLE_COLUMNS = [
+    "PitchUID",
+    "Date",
+    "game_pk",
+    "at_bat_index",
+    "inning",
+    "half_inning",
+    "pitcher_id",
+    "batter_id",
+    "pitch_number",
+    "pitch_type",
+    "pitch_call",
+    "balls",
+    "strikes",
+    "outs",
+    "start_speed",
+    "end_speed",
+    "spin_rate",
+    "horizontal_break",
+    "induced_vertical_break",
+    "plate_x",
+    "plate_z",
+    "zone",
+    "launchSpeed",
+    "launchAngle",
+    "eventType",
+    "description",
+    "pitcherSide",
+    "batterSide",
+    "Arm_Slot_Updated_X",
+    "Max_Elb_Var_Torque_X",
+    "Normalized_Max_Elb_Var_Torque_X",
+    "Max_Resultant_Sho_Force_X",
+]
 
 def clean_for_json(df):
-    return df.replace({np.nan: None})
+    """
+    FastAPI cannot serialize NaN or +/- infinity.
+    Convert them to None so they become JSON null.
+    """
+    return (
+        df.replace([np.inf, -np.inf], np.nan)
+        .astype(object)
+        .where(pd.notna(df), None)
+    )
 
-# setting up filtering and sorting
+def safe_mean(df, column_name):
+    if column_name not in df.columns:
+        return None
+
+    value = df[column_name].mean()
+
+    if pd.isna(value):
+        return None
+
+    return round(value, 2)
+
+
+def get_unique_strings(df, column_name):
+    if column_name not in df.columns:
+        return []
+
+    values = df[column_name].dropna().astype(str).unique().tolist()
+    values = [value for value in values if value.strip() != ""]
+    return sorted(values)
+
+
+def get_unique_ints(df, column_name):
+    if column_name not in df.columns:
+        return []
+
+    values = df[column_name].dropna().unique().tolist()
+
+    cleaned_values = []
+    for value in values:
+        try:
+            cleaned_values.append(int(value))
+        except (TypeError, ValueError):
+            pass
+
+    return sorted(set(cleaned_values))
+
+
+def get_speed_range(df):
+    if "end_speed" not in df.columns:
+        return {"min": None, "max": None}
+
+    min_speed = df["end_speed"].min()
+    max_speed = df["end_speed"].max()
+
+    return {
+        "min": None if pd.isna(min_speed) else round(float(min_speed), 1),
+        "max": None if pd.isna(max_speed) else round(float(max_speed), 1),
+    }
+
+
+def get_pitch_filtering_categories():
+    """
+    Frontend dropdown/filter options.
+    Return arrays, not value_counts dictionaries, because the React UI
+    needs a list of selectable values.
+    """
+    df = load_data()
+
+    years = []
+    if "Date" in df.columns:
+        years = (
+            df["Date"]
+            .dropna()
+            .astype(str)
+            .str[:4]
+            .unique()
+            .tolist()
+        )
+        years = sorted(years)
+
+    return {
+        "pitch_types": get_unique_strings(df, "pitch_type"),
+        "pitch_results": get_unique_strings(df, "pitch_call"),
+        "dates": get_unique_strings(df, "Date"),
+        "years": years,
+        "innings": get_unique_ints(df, "inning"),
+        "batter_sides": get_unique_strings(df, "batterSide"),
+        "pitcher_sides": get_unique_strings(df, "pitcherSide"),
+        "balls": get_unique_ints(df, "balls"),
+        "strikes": get_unique_ints(df, "strikes"),
+        "outs": get_unique_ints(df, "outs"),
+        "speed_range": get_speed_range(df),
+    }
+
 def get_filtered_pitches(
     sort_by=None,
     sort_order="asc",
@@ -19,25 +146,9 @@ def get_filtered_pitches(
     pitcher_side=None,
     balls=None,
     strikes=None,
-    outs=None
+    outs=None,
 ):
     df = load_data()
-
-    if sort_by:
-        if sort_order == "asc": 
-            ascending = sort_order == "asc"
-
-            df = df.sort_values(
-                by=sort_by,
-                ascending=ascending
-            )
-        elif sort_order == "desc":
-            descending = sort_order == "desc"
-
-            df = df.sort_values(
-                by=sort_by,
-                ascending=descending
-            )
 
     if pitch_type:
         df = df[df["pitch_type"] == pitch_type]
@@ -49,15 +160,15 @@ def get_filtered_pitches(
         df = df[df["end_speed"] <= max_speed]
 
     if date:
-        df = df[df["Date"] == date]
+        df = df[df["Date"].astype(str) == date]
 
     if year:
-        df = df[df["Date"].str[:4] == year]
+        df = df[df["Date"].astype(str).str[:4] == year]
 
     if pitch_result:
         df = df[df["pitch_call"] == pitch_result]
 
-    if inning:
+    if inning is not None:
         df = df[df["inning"] == inning]
 
     if batter_side:
@@ -66,62 +177,38 @@ def get_filtered_pitches(
     if pitcher_side:
         df = df[df["pitcherSide"] == pitcher_side]
 
-    if balls:
+    if balls is not None:
         df = df[df["balls"] == balls]
 
-    if strikes:
+    if strikes is not None:
         df = df[df["strikes"] == strikes]
- 
-    if outs: 
+
+    if outs is not None:
         df = df[df["outs"] == outs]
 
-    #print(df)
+    if sort_by and sort_by in df.columns:
+        df = df.sort_values(
+            by=sort_by,
+            ascending=(sort_order != "desc"),
+            na_position="last",
+        )
 
+    columns_to_return = [
+        column for column in TABLE_COLUMNS
+        if column in df.columns
+    ]
+
+    df = df[columns_to_return]
     df = clean_for_json(df)
+
     return df.to_dict(orient="records")
-
-#get_filtered_pitches(balls=1, strikes=2, sort_order="desc", sort_by="end_speed")
-
-def get_pitch_filtering_categories():
-    # will later use this to providing filtering options
-    df = load_data()
-
-    pitch_calls = df["pitch_call"].value_counts().to_dict()
-    pitch_types = df["pitch_type"].value_counts().to_dict()
-    batter_ids = df["batter_id"].value_counts().to_dict()
-    batter_sides = df["batterSide"].value_counts().to_dict()
-    pitcher_sides = df["pitcherSide"].value_counts().to_dict()
-    years = df["Date"].str[:4].value_counts().to_dict()
-    dates = df["Date"].value_counts().to_dict()
-
-    # get all columns with numeric data types
-    df_numeric = df.select_dtypes(include=['number']).columns.tolist()
-    #print(df_numeric)
-
-    return (
-        pitch_calls,
-        pitch_types,
-        batter_ids,
-        batter_sides,
-        pitcher_sides,
-        years,
-        dates,
-    )
-
-#get_pitch_filtering_categories()
 
 def get_summary():
     df = load_data()
 
-    summary = {
+    return {
         "total_pitches": len(df),
-        "average_end_speed": round(df["end_speed"].mean(), 2),
-        "average_spin_rate": round(df["spin_rate"].mean(), 2),
+        "average_end_speed": safe_mean(df, "end_speed"),
+        "average_spin_rate": safe_mean(df, "spin_rate"),
         "pitch_type_counts": df["pitch_type"].value_counts().to_dict(),
     }
-
-    #print(summary["average_end_speed"])
-    #print(summary["average_spin_rate"])
-    #print(summary["pitch_type_counts"])
-    
-    return summary
