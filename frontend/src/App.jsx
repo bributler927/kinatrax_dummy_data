@@ -1,5 +1,10 @@
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
+
+import YearComparisonPage from "./pages/YearComparisonPage";
+import TrendsPage from "./pages/TrendsPage";
+import MovementProfilePage from "./pages/MovementProfilePage";
+
 import "./App.css";
 
 const API_BASE_URL = "http://localhost:8000";
@@ -10,11 +15,6 @@ const TABLE_COLUMNS = [
   {
     key: "Date",
     label: "Date",
-    sortable: false,
-  },
-  {
-    key: "pitcher_id",
-    label: "Pitcher",
     sortable: false,
   },
   {
@@ -33,8 +33,8 @@ const TABLE_COLUMNS = [
     sortable: false,
   },
   {
-    key: "pitch_call",
-    label: "Result",
+    key: "pitch_outcome_display",
+    label: "Outcome",
     sortable: false,
   },
   {
@@ -83,6 +83,7 @@ function formatTableValue(pitch, key) {
 
 const DEFAULT_FILTERS = {
   pitch_type: "",
+  batter_id: "",
   pitch_result: "",
   date: "",
   year: "",
@@ -100,6 +101,7 @@ const DEFAULT_FILTERS = {
 
 const DEFAULT_FILTER_OPTIONS = {
   pitch_types: [],
+  batter_ids: [],
   pitch_results: [],
   dates: [],
   years: [],
@@ -120,7 +122,7 @@ const SORT_OPTIONS = [
   { value: "start_speed", label: "Speed" },
   { value: "spin_rate", label: "Spin Rate" },
   { value: "pitch_type", label: "Pitch Type" },
-  { value: "pitch_call", label: "Pitch Result" },
+  { value: "pitch_outcome_display", label: "Pitch Outcome" },
   { value: "inning", label: "Inning" },
   { value: "balls", label: "Balls" },
   { value: "strikes", label: "Strikes" },
@@ -380,13 +382,12 @@ function PitchDetailPage() {
           <p className="subtle-text">Pitch Detail</p>
           <h1>{pitch.pitch_type ?? "Pitch"} — {pitchDetail.pitch_uid}</h1>
           <p>
-            {pitch.Date ?? "Unknown date"} · Pitcher {pitch.pitcher_id ?? "—"} ·
-            Batter {pitch.batter_id ?? "—"}
+            {pitch.Date ?? "Unknown date"} · Batter {pitch.batter_id ?? "—"}
           </p>
         </div>
 
         <div className="pitch-detail-result">
-          <span>{pitch.pitch_call ?? "—"}</span>
+          <span>{pitch.pitch_outcome_display ?? "—"}</span>
           <strong>{pitch.start_speed ?? "—"} mph</strong>
         </div>
       </section>
@@ -587,9 +588,24 @@ function DashboardPage() {
   const averageSpeed =
     summary?.average_speed ?? summary?.average_start_speed ?? summary?.average_end_speed;
 
+  const currentPitcherId =
+    summary?.current_pitcher_id ??
+    pitches.find((pitch) => pitch.pitcher_id)?.pitcher_id ??
+    "Unknown";
+
   return (
     <main className="dashboard">
-      <h1>Pitch Analytics Dashboard</h1>
+      <header className="dashboard-topbar">
+        <div>
+          <p className="dashboard-eyebrow">Pitcher + Trainer View</p>
+          <h1>Pitch Analytics Dashboard</h1>
+        </div>
+
+        <div className="current-pitcher-badge">
+          <span>Current Pitcher</span>
+          <strong>{currentPitcherId}</strong>
+        </div>
+      </header>
 
       {error && <p className="error-message">{error}</p>}
 
@@ -608,6 +624,29 @@ function DashboardPage() {
           onClick={() => setActiveTab("table")}
         >
           Pitch Table
+        </button>
+
+        <button
+          type="button"
+          className={activeTab === "compare" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("compare")}
+        >
+          Year Compare
+        </button>
+
+        <button
+          type="button"
+          className={activeTab === "trends" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("trends")}
+        >
+          Trends
+        </button>
+        <button
+          type="button"
+          className={activeTab === "movement" ? "tab-button active" : "tab-button"}
+          onClick={() => setActiveTab("movement")}
+        >
+          Movement Profile
         </button>
       </div>
 
@@ -681,10 +720,18 @@ function DashboardPage() {
               />
 
               <SelectFilter
-                label="Pitch Result"
+                label="Pitch Outcome"
                 name="pitch_result"
                 value={filters.pitch_result}
                 options={filterOptions.pitch_results}
+                onChange={handleFilterChange}
+              />
+
+              <SelectFilter
+                label="Batter"
+                name="batter_id"
+                value={filters.batter_id}
+                options={filterOptions.batter_ids}
                 onChange={handleFilterChange}
               />
 
@@ -891,6 +938,12 @@ function DashboardPage() {
           </div>
         </section>
       )}
+
+      {activeTab === "compare" && <YearComparisonPage />}
+
+      {activeTab === "trends" && <TrendsPage />}
+
+      {activeTab === "movement" && <MovementProfilePage />}
     </main>
   );
 }

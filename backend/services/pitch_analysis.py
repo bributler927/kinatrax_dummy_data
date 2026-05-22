@@ -10,11 +10,11 @@ TABLE_COLUMNS = [
     "at_bat_index",
     "inning",
     "half_inning",
-    "pitcher_id",
     "batter_id",
     "pitch_number",
     "pitch_type",
-    "pitch_call",
+    "pitch_outcome",
+    "pitch_outcome_display",
     "balls",
     "strikes",
     "outs",
@@ -100,6 +100,88 @@ def get_speed_range(df):
         "max": None if pd.isna(max_speed) else round(float(max_speed), 1),
     }
 
+def get_text_series(df, column_name):
+    if column_name not in df.columns:
+        return pd.Series([""] * len(df), index=df.index)
+
+    return df[column_name].fillna("").astype(str).str.strip()
+
+
+def add_pitch_outcome(df):
+    df = df.copy()
+
+    df["pitch_outcome"] = get_text_series(df, "eventTypeD")
+
+    #eventTypeD is blank for some pitches, so replace it with a guranteed column
+    for fallback_column in ["eventType", "description", "pitch_call"]:
+        missing_outcome = df["pitch_outcome"] == ""
+        df.loc[missing_outcome, "pitch_outcome"] = get_text_series(
+            df,
+            fallback_column
+        )[missing_outcome]
+
+    return df
+
+def format_pitch_result_label(value):
+    if value is None or pd.isna(value):
+        return None
+
+    text = str(value).strip()
+
+    if text == "":
+        return None
+
+    special_cases = {
+        "hbp": "HBP",
+        "hit_by_pitch": "Hit By Pitch",
+    }
+
+    raw_key = text.lower()
+
+    if raw_key in special_cases:
+        return special_cases[raw_key]
+
+    words = text.replace("_", " ").split()
+
+    return " ".join(word.capitalize() for word in words)
+
+
+def add_pitch_outcome_display(df):
+    """
+    Creates:
+    - pitch_outcome: raw filter value, such as field_out
+    - pitch_outcome_display: frontend label, such as Field Out
+    """
+    df = add_pitch_outcome(df)
+
+    df["pitch_outcome_display"] = df["pitch_outcome"].apply(
+        format_pitch_result_label
+    )
+
+    return df
+
+
+def get_value_label_options(df, value_column, label_column):
+    if value_column not in df.columns or label_column not in df.columns:
+        return []
+
+    options_df = df[[value_column, label_column]].dropna().drop_duplicates()
+
+    options_df = options_df[
+        options_df[value_column].astype(str).str.strip() != ""
+    ]
+
+    options_df = options_df.sort_values(label_column)
+
+    return (
+        options_df.rename(
+            columns={
+                value_column: "value",
+                label_column: "label",
+            }
+        )
+        .to_dict(orient="records")
+    )
 
 def get_pitch_filtering_categories():
     """
@@ -108,6 +190,7 @@ def get_pitch_filtering_categories():
     needs a list of selectable values.
     """
     df = load_data()
+    df = add_pitch_outcome_display(df)
 
     years = []
     if "Date" in df.columns:
@@ -120,10 +203,15 @@ def get_pitch_filtering_categories():
             .tolist()
         )
         years = sorted(years)
+        
 
     return {
         "pitch_types": get_unique_strings(df, "pitch_type"),
-        "pitch_results": get_unique_strings(df, "pitch_call"),
+        "pitch_results": get_value_label_options(
+            df, 
+            "pitch_outcome",
+            "pitch_outcome_display"),
+        "batter_ids": get_unique_strings(df, "batter_id"),
         "dates": get_unique_strings(df, "Date"),
         "years": years,
         "innings": get_unique_ints(df, "inning"),
@@ -139,6 +227,7 @@ def get_filtered_pitches(
     sort_by=None,
     sort_order="asc",
     pitch_type=None,
+    batter_id=None,
     min_speed=None,
     max_speed=None,
     date=None,
@@ -152,9 +241,13 @@ def get_filtered_pitches(
     outs=None,
 ):
     df = load_data()
+    df = add_pitch_outcome_display(df)
 
     if pitch_type:
         df = df[df["pitch_type"] == pitch_type]
+
+    if batter_id:
+        df = df[df["batter_id"] == batter_id]
 
     if min_speed is not None:
         df = df[df["start_speed"] >= min_speed]
@@ -169,7 +262,7 @@ def get_filtered_pitches(
         df = df[df["Date"].astype(str).str[:4] == year]
 
     if pitch_result:
-        df = df[df["pitch_call"] == pitch_result]
+        df = df[df["pitch_outcome"] == pitch_result]
 
     if inning is not None:
         df = df[df["inning"] == inning]
@@ -339,7 +432,18 @@ def get_pitch_detail(pitch_uid):
 def get_summary():
     df = load_data()
 
+    pitcher_ids = (
+        df["pitcher_id"]
+        .dropna()
+        .astype(str)
+        .unique()
+        .tolist()
+    )
+
+    current_pitcher_id = pitcher_ids[0] if len(pitcher_ids) == 1 else "Multiple"
+
     return {
+        "current_pitcher_id": current_pitcher_id,
         "total_pitches": len(df),
         "average_speed": safe_mean(df, "start_speed"),
         "average_spin_rate": safe_mean(df, "spin_rate"),

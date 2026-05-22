@@ -20,6 +20,7 @@ def filter_options():
 @router.get("/pitches")
 def pitches(
     pitch_type: str | None = None,
+    batter_id: str | None = None,
     sort_by: str | None = None,
     sort_order: str = "asc",
     min_speed: float | None = None,
@@ -38,6 +39,7 @@ def pitches(
         sort_by=sort_by,
         sort_order=sort_order,
         pitch_type=pitch_type,
+        batter_id=batter_id,
         min_speed=min_speed,
         max_speed=max_speed,
         date=date,

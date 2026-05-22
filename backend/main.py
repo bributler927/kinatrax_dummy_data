@@ -1,6 +1,7 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routes.pitches import router as pitches_router
+from routes.analytics import router as analytics_router
 
 app = FastAPI()
 
@@ -29,6 +30,7 @@ app.add_middleware(
 '''
 
 app.include_router(pitches_router, prefix="/api")
+app.include_router(analytics_router, prefix="/api/analytics")
 
 # No pagination reqiured because it's a small dataset?
 @app.get("/")
