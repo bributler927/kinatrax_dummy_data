@@ -14,26 +14,9 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-'''
- Categories to plot:
-    - pfx_x = horizontal movement
-    - pfx_z = vertical movement
-    - x0 = horizontal release point
-    - y0 = release distance from plate
-    - z0 = vertical release point
-    - plate_x = horizontal plate crossing
-    - plate_z = vertical plate crosing
-'''
-
-'''
- SECTION: API ENDPOINTS
-'''
-
 app.include_router(pitches_router, prefix="/api")
 app.include_router(analytics_router, prefix="/api/analytics")
 
-# No pagination reqiured because it's a small dataset?
 @app.get("/")
 def root():
     return {"message": "Python analytics backend is running"}
-
