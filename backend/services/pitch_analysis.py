@@ -38,6 +38,392 @@ TABLE_COLUMNS = [
     "Max_Resultant_Sho_Force_X",
 ]
 
+TIME_SERIES_CONTEXT_COLUMNS = [
+    "sample",
+    "frame",
+    "Frame",
+    "time",
+    "Time",
+    "timestamp",
+    "phase",
+    "event",
+    "Event",
+]
+
+TIME_SERIES_GROUPS = [
+    {
+        "title": "Arm / Shoulder",
+        "keywords": [
+            "Sho_",
+            "Shoulder",
+            "Arm_Slot",
+            "Upper_Arm",
+            "Forearm",
+        ],
+    },
+    {
+        "title": "Elbow",
+        "keywords": [
+            "Elb_",
+            "Elbow",
+            "Elb_Var_Torque",
+            "Normalized_Elb",
+        ],
+    },
+    {
+        "title": "Pelvis / Trunk / Sequencing",
+        "keywords": [
+            "Pelvis",
+            "Trunk",
+            "Hip_Sho",
+            "PELVIS_TRUNK",
+            "TRUNK_ELBOW",
+        ],
+    },
+    {
+        "title": "Lower Body / Stride",
+        "keywords": [
+            "Lead_Knee",
+            "Lead_Hip",
+            "Trail_Hip",
+            "Stride",
+            "Step_Width",
+            "Foot",
+            "Ankle",
+        ],
+    },
+    {
+        "title": "Center of Mass",
+        "keywords": [
+            "COM_",
+            "Center_Mass",
+        ],
+    },
+    {
+        "title": "Forces / Torques",
+        "keywords": [
+            "Force",
+            "Torque",
+            "GRF",
+            "RFD",
+            "PEAK",
+            "NORMALIZED",
+            "Normalized",
+        ],
+    },
+]
+
+
+KEY_EVENT_FIELDS = {
+    "03_MAX_KNEE_LIFT_X": "Max Knee Lift",
+    "06_FOOTSTRIKE_X": "Foot Strike",
+    "07_MAX_EXTERNAL_SHOULDER_ROTATION_X": "Max External Shoulder Rotation",
+    "08_RELEASE_X": "Ball Release",
+    "09_MAX_INTERNAL_SHOULDER_ROTATION_X": "Max Internal Shoulder Rotation",
+    "10_RELEASE_PLUS_30_X": "Release + 30",
+    "11_END_NORM_X": "End Normalized Motion",
+}
+
+
+def load_data_with_timeseries():
+    """
+    If you implemented the cached loader from earlier, this will use
+    include_timeseries=True. If your loader still always merges timeseries,
+    this fallback still works.
+    """
+    try:
+        return load_data(include_timeseries=True)
+    except TypeError:
+        return load_data()
+
+
+def contains_list(value):
+    if isinstance(value, list):
+        return True
+
+    if isinstance(value, dict):
+        return any(contains_list(child_value) for child_value in value.values())
+
+    return False
+
+
+def get_max_list_length(value):
+    if isinstance(value, list):
+        return len(value)
+
+    if isinstance(value, dict):
+        lengths = [
+            get_max_list_length(child_value)
+            for child_value in value.values()
+        ]
+
+        return max(lengths) if lengths else 0
+
+    return 0
+
+
+def get_value_at_index(value, index):
+    if isinstance(value, list):
+        return value[index] if index < len(value) else None
+
+    if isinstance(value, dict):
+        return {
+            key: get_value_at_index(child_value, index)
+            for key, child_value in value.items()
+        }
+
+    return value
+
+
+def normalize_column_name(value):
+    return (
+        str(value)
+        .strip()
+        .replace(" ", "_")
+        .replace("/", "_")
+        .replace("-", "_")
+        .replace("(", "")
+        .replace(")", "")
+        .replace("__", "_")
+    )
+
+
+def flatten_nested_value(prefix, value):
+    """
+    Converts nested values into flat scalar columns.
+
+    Example:
+    "Pitching Shoulder Rotation": {"x": 1.2, "y": 3.4}
+    becomes:
+    "Pitching_Shoulder_Rotation_x": 1.2
+    "Pitching_Shoulder_Rotation_y": 3.4
+    """
+    prefix = normalize_column_name(prefix)
+
+    if isinstance(value, dict):
+        flattened = {}
+
+        for nested_key, nested_value in value.items():
+            nested_column = f"{prefix}_{normalize_column_name(nested_key)}"
+            flattened.update(
+                flatten_nested_value(nested_column, nested_value)
+            )
+
+        return flattened
+
+    if isinstance(value, list):
+        # At this point, lists should already have been indexed.
+        # If a list still slips through, keep it out of chartable columns.
+        return {prefix: None}
+
+    return {prefix: value}
+
+
+def flatten_timeseries_row(row):
+    flattened_row = {}
+
+    for key, value in row.items():
+        flattened_row.update(flatten_nested_value(key, value))
+
+    return flattened_row
+
+
+def normalize_timeseries_rows(timeseries):
+    """
+    Converts time-series data into a list of flat row dictionaries.
+
+    Handles:
+    - list of row dicts
+    - dict of arrays
+    - dict of nested arrays
+    - dict of scalar values
+    """
+    if timeseries is None:
+        return []
+
+    if isinstance(timeseries, list):
+        rows = []
+
+        for index, item in enumerate(timeseries):
+            if isinstance(item, dict):
+                row = {
+                    "sample": index,
+                    **item,
+                }
+            else:
+                row = {
+                    "sample": index,
+                    "value": item,
+                }
+
+            rows.append(flatten_timeseries_row(row))
+
+        return rows
+
+    if isinstance(timeseries, dict):
+        has_time_series_arrays = any(
+            contains_list(value)
+            for value in timeseries.values()
+        )
+
+        if has_time_series_arrays:
+            max_length = max(
+                get_max_list_length(value)
+                for value in timeseries.values()
+            )
+
+            rows = []
+
+            for index in range(max_length):
+                row = {
+                    "sample": index,
+                }
+
+                for key, value in timeseries.items():
+                    row[key] = get_value_at_index(value, index)
+
+                rows.append(flatten_timeseries_row(row))
+
+            return rows
+
+        return [flatten_timeseries_row(timeseries)]
+
+    return []
+
+
+def get_key_event_table(row):
+    events = []
+
+    for field, label in KEY_EVENT_FIELDS.items():
+        if field in row and row.get(field) is not None:
+            events.append({
+                "event": label,
+                "field": field,
+                "frame": row.get(field),
+            })
+
+    return events
+
+
+def is_numeric_like(value):
+    if value is None:
+        return False
+
+    if isinstance(value, bool):
+        return False
+
+    if isinstance(value, (int, float)):
+        return not pd.isna(value)
+
+    try:
+        float(value)
+        return True
+    except (TypeError, ValueError):
+        return False
+
+
+def column_has_numeric_data(rows, column):
+    return any(is_numeric_like(row.get(column)) for row in rows)
+
+
+def get_timeseries_columns(rows, keywords):
+    all_columns = sorted({
+        column
+        for row in rows
+        for column in row.keys()
+    })
+
+    context_columns = [
+        column
+        for column in TIME_SERIES_CONTEXT_COLUMNS
+        if column in all_columns
+    ]
+
+    metric_columns = [
+        column
+        for column in all_columns
+        if any(keyword.lower() in column.lower() for keyword in keywords)
+        and column_has_numeric_data(rows, column)
+    ]
+
+    return context_columns + metric_columns
+
+
+def convert_numeric_value(value):
+    if value is None:
+        return None
+
+    if isinstance(value, bool):
+        return value
+
+    if isinstance(value, (int, float)):
+        return None if pd.isna(value) else value
+
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return value
+
+
+def build_timeseries_table(rows, columns, max_rows=300):
+    table_rows = []
+
+    for row in rows[:max_rows]:
+        table_rows.append({
+            column: convert_numeric_value(row.get(column))
+            for column in columns
+        })
+
+    if not table_rows:
+        return []
+
+    table_df = pd.DataFrame(table_rows)
+    table_df = clean_for_json(table_df)
+
+    return table_df.to_dict(orient="records")
+
+
+def get_pitch_timeseries_tables(pitch_uid):
+    df = load_data_with_timeseries()
+
+    matching_pitch = df[df["PitchUID"] == pitch_uid]
+
+    if matching_pitch.empty:
+        return None
+
+    matching_pitch = clean_for_json(matching_pitch)
+    row = matching_pitch.iloc[0].to_dict()
+
+    timeseries = row.get("timeseries")
+    timeseries_rows = normalize_timeseries_rows(timeseries)
+
+    tables = []
+
+    for group in TIME_SERIES_GROUPS:
+        columns = get_timeseries_columns(
+            timeseries_rows,
+            group["keywords"],
+        )
+
+        if not columns:
+            continue
+
+        rows = build_timeseries_table(timeseries_rows, columns)
+
+        if rows:
+            tables.append({
+                "title": group["title"],
+                "columns": columns,
+                "rows": rows,
+            })
+
+    return {
+        "pitch_uid": pitch_uid,
+        "sample_count": len(timeseries_rows),
+        "key_events": get_key_event_table(row),
+        "tables": tables,
+    }
+
 
 def clean_for_json(df):
     """
@@ -402,7 +788,7 @@ def is_biomech_field(field_name):
 
 
 def get_pitch_detail(pitch_uid):
-    df = load_data()
+    df = load_data(include_timeseries=True)
 
     matching_pitch = df[df["PitchUID"] == pitch_uid]
 

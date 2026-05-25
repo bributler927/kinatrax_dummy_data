@@ -4,6 +4,7 @@ from services.pitch_analysis import (
     get_filtered_pitches,
     get_pitch_filtering_categories,
     get_pitch_detail,
+    get_pitch_timeseries_tables,
 )
 
 router = APIRouter()
@@ -64,3 +65,15 @@ def pitch_detail(pitch_uid: str):
         )
 
     return pitch
+
+@router.get("/pitches/{pitch_uid}/timeseries")
+def pitch_timeseries(pitch_uid: str):
+    timeseries = get_pitch_timeseries_tables(pitch_uid)
+
+    if timeseries is None:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Pitch {pitch_uid} not found",
+        )
+
+    return timeseries

@@ -9,6 +9,7 @@ import {
   ResponsiveContainer,
 } from "recharts";
 import { getPitchTrends } from "../api/api";
+import PitchTypeDropdown from "../components/PitchTypeDropdown";
 
 const TREND_METRICS = [
   {
@@ -37,7 +38,7 @@ const TREND_METRICS = [
   },
 ];
 
-function TrendsPage() {
+function TrendsPage({ filterOptions }) {
   const [groupBy, setGroupBy] = useState("month");
   const [pitchType, setPitchType] = useState("");
   const [trendData, setTrendData] = useState([]);
@@ -94,14 +95,11 @@ function TrendsPage() {
             </select>
           </label>
 
-          <label className="filter-control">
-            <span>Pitch Type</span>
-            <input
-              value={pitchType}
-              placeholder="Example: Sinker"
-              onChange={(event) => setPitchType(event.target.value)}
-            />
-          </label>
+          <PitchTypeDropdown
+            value={pitchType}
+            onChange={setPitchType}
+            pitchTypes={filterOptions?.pitch_types ?? []}
+          />
 
           <label className="filter-control">
             <span>Metric</span>

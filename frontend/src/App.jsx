@@ -1,5 +1,15 @@
 import { useEffect, useState } from "react";
 import { Link, Route, Routes, useNavigate, useParams } from "react-router-dom";
+import {
+  LineChart,
+  Line,
+  XAxis,
+  YAxis,
+  CartesianGrid,
+  Tooltip,
+  ResponsiveContainer,
+  ReferenceLine,
+} from "recharts";
 
 import YearComparisonPage from "./pages/YearComparisonPage";
 import TrendsPage from "./pages/TrendsPage";
@@ -309,6 +319,525 @@ function DetailSection({ title, data }) {
   );
 }
 
+const TIME_SERIES_ROWS_PER_PAGE = 40;
+
+function formatTimeSeriesValue(value) {
+  if (value === null || value === undefined || value === "") {
+    return "—";
+  }
+
+  const numericValue = getTimeSeriesNumericValue(value);
+
+  if (numericValue !== null) {
+    return Number.isInteger(numericValue)
+      ? numericValue
+      : numericValue.toFixed(2);
+  }
+
+  const parsedValue = parseMaybeJson(value);
+
+  if (typeof parsedValue === "object") {
+    return JSON.stringify(parsedValue);
+  }
+
+  return String(parsedValue);
+}
+
+function TimeSeriesKeyEvents({ keyEvents }) {
+  if (!keyEvents || keyEvents.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="timeseries-key-events">
+      {keyEvents.map((event) => (
+        <div className="detail-card" key={event.field}>
+          <span>{event.event}</span>
+          <strong>{formatTimeSeriesValue(event.frame)}</strong>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function TimeSeriesDataTable({ table }) {
+  const [visibleRows, setVisibleRows] = useState(TIME_SERIES_ROWS_PER_PAGE);
+
+  const rowsToShow = table.rows.slice(0, visibleRows);
+  const hasMoreRows = visibleRows < table.rows.length;
+
+  return (
+    <>
+      <div className="table-wrapper timeseries-table-wrapper">
+        <table className="pitch-table timeseries-table">
+          <thead>
+            <tr>
+              {table.columns.map((column) => (
+                <th key={column}>{formatDetailLabel(column)}</th>
+              ))}
+            </tr>
+          </thead>
+
+          <tbody>
+            {rowsToShow.map((row, rowIndex) => (
+              <tr key={row.sample ?? row.frame ?? rowIndex}>
+                {table.columns.map((column) => (
+                  <td key={column} title={getTimeSeriesCellTitle(row[column])}>
+                    {formatTimeSeriesValue(row[column])}
+                  </td>
+                ))}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      <div className="pagination-controls">
+        <p>
+          Showing {Math.min(visibleRows, table.rows.length)} of{" "}
+          {table.rows.length} samples
+        </p>
+
+        {hasMoreRows && (
+          <button
+            type="button"
+            className="secondary-button"
+            onClick={() =>
+              setVisibleRows((current) =>
+                Math.min(current + TIME_SERIES_ROWS_PER_PAGE, table.rows.length)
+              )
+            }
+          >
+            Show more samples
+          </button>
+        )}
+      </div>
+    </>
+  );
+}
+
+const TIME_SERIES_CONTEXT_COLUMNS = new Set([
+  "sample",
+  "frame",
+  "Frame",
+  "time",
+  "Time",
+  "timestamp",
+  "phase",
+  "event",
+  "Event",
+]);
+
+const PREFERRED_TIME_SERIES_METRICS = [
+  "Elb_Var_Torque",
+  "Normalized_Elb_Var_Torque",
+  "Max_Elb_Var_Torque",
+  "Sho_Rot",
+  "Sho_Rot_Vel",
+  "Sho_Rot_Torque",
+  "Resultant_Sho_Force",
+  "Pelvis_Rotation",
+  "Trunk_Rotation",
+  "Hip_Sho_Sep",
+  "Lead_Knee_Flex",
+  "Lead_Knee_Flex_Vel",
+  "COM_AP",
+  "COM_VERT",
+];
+
+function isNumericValue(value) {
+  return getTimeSeriesNumericValue(value) !== null;
+}
+
+function getTimeSeriesXKey(table) {
+  const preferredKeys = ["time", "Time", "frame", "Frame", "sample"];
+
+  return (
+    preferredKeys.find((key) => table.columns.includes(key)) ??
+    table.columns[0]
+  );
+}
+
+function getTimeSeriesMetricColumns(table) {
+  return table.columns.filter((column) => {
+    if (TIME_SERIES_CONTEXT_COLUMNS.has(column)) {
+      return false;
+    }
+
+    return table.rows.some((row) => isNumericValue(row[column]));
+  });
+}
+
+function getPreferredTimeSeriesMetric(metricColumns) {
+  const preferredMetric = PREFERRED_TIME_SERIES_METRICS.find((preferred) =>
+    metricColumns.some((column) =>
+      column.toLowerCase().includes(preferred.toLowerCase())
+    )
+  );
+
+  if (!preferredMetric) {
+    return metricColumns[0] ?? "";
+  }
+
+  return (
+    metricColumns.find((column) =>
+      column.toLowerCase().includes(preferredMetric.toLowerCase())
+    ) ?? metricColumns[0]
+  );
+}
+
+function getShortEventLabel(eventName) {
+  const labels = {
+    "Foot Strike": "FS",
+    "Max External Shoulder Rotation": "MER",
+    "Ball Release": "BR",
+    "Max Internal Shoulder Rotation": "MIR",
+    "Release + 30": "R+30",
+    "End Normalized Motion": "End",
+  };
+
+  return labels[eventName] ?? eventName;
+}
+
+function buildTimeSeriesChartRows(table, xKey, metricKey) {
+  return table.rows
+    .map((row, index) => {
+      const metricValue = getTimeSeriesNumericValue(row[metricKey]);
+
+      if (metricValue === null) {
+        return null;
+      }
+
+      const embeddedFrame = getTimeSeriesFrameValue(row[metricKey]);
+      const rowXValue = getTimeSeriesNumericValue(row[xKey]);
+
+      const x =
+        embeddedFrame !== null
+          ? embeddedFrame
+          : rowXValue !== null
+          ? rowXValue
+          : index;
+
+      return {
+        x,
+        value: metricValue,
+        originalRow: row,
+      };
+    })
+    .filter(Boolean);
+}
+
+function getPlotableKeyEvents(keyEvents, chartRows) {
+  if (!keyEvents?.length || !chartRows.length) {
+    return [];
+  }
+
+  const xValues = chartRows.map((row) => row.x);
+  const minX = Math.min(...xValues);
+  const maxX = Math.max(...xValues);
+
+  return keyEvents.filter((event) => {
+    const frame = Number(event.frame);
+
+    return Number.isFinite(frame) && frame >= minX && frame <= maxX;
+  });
+}
+
+function parseMaybeJson(value) {
+  if (typeof value !== "string") {
+    return value;
+  }
+
+  const trimmedValue = value.trim();
+
+  if (!trimmedValue.startsWith("{") && !trimmedValue.startsWith("[")) {
+    return value;
+  }
+
+  try {
+    return JSON.parse(trimmedValue);
+  } catch {
+    return value;
+  }
+}
+
+function getTimeSeriesNumericValue(value) {
+  const parsedValue = parseMaybeJson(value);
+
+  if (parsedValue === null || parsedValue === undefined || parsedValue === "") {
+    return null;
+  }
+
+  if (
+    typeof parsedValue === "object" &&
+    parsedValue !== null &&
+    "value" in parsedValue
+  ) {
+    const numericValue = Number(parsedValue.value);
+    return Number.isFinite(numericValue) ? numericValue : null;
+  }
+
+  const numericValue = Number(parsedValue);
+  return Number.isFinite(numericValue) ? numericValue : null;
+}
+
+function getTimeSeriesFrameValue(value) {
+  const parsedValue = parseMaybeJson(value);
+
+  if (
+    typeof parsedValue === "object" &&
+    parsedValue !== null &&
+    "frame" in parsedValue
+  ) {
+    const numericFrame = Number(parsedValue.frame);
+    return Number.isFinite(numericFrame) ? numericFrame : null;
+  }
+
+  return null;
+}
+
+function getTimeSeriesCellTitle(value) {
+  const parsedValue = parseMaybeJson(value);
+
+  if (
+    typeof parsedValue === "object" &&
+    parsedValue !== null &&
+    "frame" in parsedValue &&
+    "value" in parsedValue
+  ) {
+    return `Frame ${parsedValue.frame}: ${parsedValue.value}`;
+  }
+
+  return String(value ?? "");
+}
+
+function TimeSeriesMetricChart({ table, keyEvents = [] }) {
+  const metricColumns = getTimeSeriesMetricColumns(table);
+  const [selectedMetric, setSelectedMetric] = useState("");
+
+  useEffect(() => {
+    setSelectedMetric(getPreferredTimeSeriesMetric(metricColumns));
+  }, [table.title]);
+
+  if (!metricColumns.length) {
+    return (
+      <div className="timeseries-chart-card">
+        <p className="subtle-text">
+          No numeric time-series metrics are available for this group.
+        </p>
+      </div>
+    );
+  }
+
+  const metricKey = selectedMetric || metricColumns[0];
+  const xKey = getTimeSeriesXKey(table);
+  const chartRows = buildTimeSeriesChartRows(table, xKey, metricKey);
+  const plotableKeyEvents = getPlotableKeyEvents(keyEvents, chartRows);
+
+  return (
+    <div className="timeseries-chart-card">
+      <div className="timeseries-chart-header">
+        <div>
+          <h3>{formatDetailLabel(metricKey)}</h3>
+          <p className="subtle-text">
+            Plotted across {formatDetailLabel(xKey)} for this pitch.
+          </p>
+        </div>
+
+        <label className="filter-control timeseries-metric-select">
+          <span>Metric</span>
+
+          <select
+            value={metricKey}
+            onChange={(event) => setSelectedMetric(event.target.value)}
+          >
+            {metricColumns.map((column) => (
+              <option key={column} value={column}>
+                {formatDetailLabel(column)}
+              </option>
+            ))}
+          </select>
+        </label>
+      </div>
+
+      <ResponsiveContainer width="100%" height={320}>
+        <LineChart
+          data={chartRows}
+          margin={{ top: 20, right: 30, bottom: 30, left: 20 }}
+        >
+          <CartesianGrid stroke="rgba(156, 163, 175, 0.25)" strokeDasharray="3 3" />
+
+          <XAxis
+            type="number"
+            dataKey="x"
+            tick={{ fill: "#9ca3af" }}
+            axisLine={{ stroke: "#9ca3af" }}
+            tickLine={{ stroke: "#9ca3af" }}
+            label={{
+              value: formatDetailLabel(xKey),
+              position: "insideBottom",
+              offset: -12,
+              fill: "#9ca3af",
+            }}
+          />
+
+          <YAxis
+            tick={{ fill: "#9ca3af" }}
+            axisLine={{ stroke: "#9ca3af" }}
+            tickLine={{ stroke: "#9ca3af" }}
+          />
+
+          <Tooltip
+            formatter={(value) => [
+              Number(value).toFixed(2),
+              formatDetailLabel(metricKey),
+            ]}
+            labelFormatter={(label) =>
+              `${formatDetailLabel(xKey)}: ${label}`
+            }
+            contentStyle={{
+              background: "var(--bg)",
+              border: "1px solid var(--border)",
+              borderRadius: "10px",
+              color: "var(--text-h)",
+            }}
+          />
+
+          {plotableKeyEvents.map((event) => (
+            <ReferenceLine
+              key={event.field}
+              x={Number(event.frame)}
+              stroke="var(--accent)"
+              strokeDasharray="5 5"
+              label={{
+                value: getShortEventLabel(event.event),
+                position: "insideTop",
+                fill: "var(--accent)",
+                fontSize: 12,
+              }}
+            />
+          ))}
+
+          <Line
+            type="monotone"
+            dataKey="value"
+            name={formatDetailLabel(metricKey)}
+            stroke="var(--accent)"
+            strokeWidth={2}
+            dot={false}
+            activeDot={{ r: 5 }}
+          />
+        </LineChart>
+      </ResponsiveContainer>
+    </div>
+  );
+}
+
+function PitchTimeSeriesSection({ pitchUid }) {
+  const [timeseriesData, setTimeseriesData] = useState(null);
+  const [activeTableIndex, setActiveTableIndex] = useState(0);
+  const [loadingTimeseries, setLoadingTimeseries] = useState(false);
+  const [timeseriesError, setTimeseriesError] = useState("");
+
+  useEffect(() => {
+    async function loadTimeseries() {
+      setLoadingTimeseries(true);
+      setTimeseriesError("");
+
+      try {
+        const data = await fetchJson(
+          `${API_BASE_URL}/api/pitches/${pitchUid}/timeseries`
+        );
+
+        setTimeseriesData(data);
+      } catch (err) {
+        setTimeseriesError(err.message);
+      } finally {
+        setLoadingTimeseries(false);
+      }
+    }
+
+    loadTimeseries();
+  }, [pitchUid]);
+
+  if (loadingTimeseries) {
+    return (
+      <section className="detail-section">
+        <h2>Time-Series Metrics</h2>
+        <p className="subtle-text">Loading time-series data...</p>
+      </section>
+    );
+  }
+
+  if (timeseriesError) {
+    return (
+      <section className="detail-section">
+        <h2>Time-Series Metrics</h2>
+        <p className="error-message">{timeseriesError}</p>
+      </section>
+    );
+  }
+
+  if (!timeseriesData || !timeseriesData.tables?.length) {
+    return (
+      <section className="detail-section">
+        <h2>Time-Series Metrics</h2>
+        <p className="subtle-text">
+          No time-series data available for this pitch.
+        </p>
+      </section>
+    );
+  }
+
+  const activeTable = timeseriesData.tables[activeTableIndex];
+
+  return (
+    <section className="detail-section">
+      <div className="table-header-row">
+        <div>
+          <h2>Time-Series Metrics</h2>
+          <p className="subtle-text">
+            Frame-by-frame metrics for this pitch. Use the dropdown to inspect
+            different movement groups.
+          </p>
+        </div>
+
+        <p className="table-count">
+          {timeseriesData.sample_count} samples
+        </p>
+      </div>
+
+      <TimeSeriesKeyEvents keyEvents={timeseriesData.key_events} />
+
+      <label className="filter-control timeseries-table-select">
+        <span>Metric Group</span>
+
+        <select
+          value={activeTableIndex}
+          onChange={(event) => setActiveTableIndex(Number(event.target.value))}
+        >
+          {timeseriesData.tables.map((table, index) => (
+            <option key={table.title} value={index}>
+              {table.title}
+            </option>
+          ))}
+        </select>
+      </label>
+
+      <TimeSeriesMetricChart
+        table={activeTable}
+        keyEvents={timeseriesData.key_events}
+      />
+
+      <details className="advanced-timeseries-details">
+        <summary>Show advanced frame-by-frame table</summary>
+
+        <TimeSeriesDataTable table={activeTable} />
+      </details>
+    </section>
+  );
+}
+
 function PitchDetailPage() {
   const { pitchUid } = useParams();
   const [pitchDetail, setPitchDetail] = useState(null);
@@ -378,25 +907,37 @@ function PitchDetailPage() {
       </Link>
 
       <section className="pitch-detail-hero">
-        <div>
+        <div className="pitch-detail-main">
           <p className="subtle-text">Pitch Detail</p>
-          <h1>{pitch.pitch_type ?? "Pitch"} — {pitchDetail.pitch_uid}</h1>
-          <p>
+
+          <div className="pitch-detail-title-row">
+            <h1>{pitch.pitch_type ?? "Pitch"}</h1>
+            <span className="pitch-detail-uid">
+              {pitchDetail.pitch_uid}
+            </span>
+          </div>
+
+          <p className="pitch-detail-meta">
             {pitch.Date ?? "Unknown date"} · Batter {pitch.batter_id ?? "—"}
+            {pitch.inning !== undefined && pitch.inning !== null
+              ? ` · Inning ${pitch.inning}`
+              : ""}
           </p>
         </div>
 
         <div className="pitch-detail-result">
-          <span>{pitch.pitch_outcome_display ?? "—"}</span>
+          <span>{pitch.pitch_outcome_display ?? pitch.pitch_call ?? "—"}</span>
           <strong>{pitch.start_speed ?? "—"} mph</strong>
         </div>
       </section>
 
       <DetailSection title="Pitch Information" data={pitchDetail.pitch} />
 
+      <DetailSection title="Batted Ball / Result" data={pitchDetail.batted_ball} />
+
       <DetailSection title="Movement / Pitch Tracking" data={pitchDetail.movement} />
 
-      <DetailSection title="Batted Ball / Result" data={pitchDetail.batted_ball} />
+      <PitchTimeSeriesSection pitchUid={pitchDetail.pitch_uid} />
 
       <DetailSection title="Biomechanical Metrics" data={pitchDetail.biomechanics} />
     </main>
@@ -939,9 +1480,13 @@ function DashboardPage() {
         </section>
       )}
 
-      {activeTab === "compare" && <YearComparisonPage />}
+      {activeTab === "compare" && (
+        <YearComparisonPage filterOptions={filterOptions} />
+      )}
 
-      {activeTab === "trends" && <TrendsPage />}
+      {activeTab === "trends" && (
+        <TrendsPage filterOptions={filterOptions} />
+      )}
 
       {activeTab === "movement" && <MovementProfilePage />}
     </main>

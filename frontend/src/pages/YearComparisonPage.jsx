@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { getYearComparison } from "../api/api";
+import PitchTypeDropdown from "../components/PitchTypeDropdown";
 
 function formatValue(value) {
   if (value === null || value === undefined) {
@@ -17,7 +18,7 @@ function formatPercent(value) {
   return `${value.toFixed(2)}%`;
 }
 
-function YearComparisonPage() {
+function YearComparisonPage({ filterOptions }) {
   const [yearA, setYearA] = useState("2023");
   const [yearB, setYearB] = useState("2025");
   const [pitchType, setPitchType] = useState("");
@@ -75,14 +76,11 @@ function YearComparisonPage() {
             />
           </label>
 
-          <label className="filter-control">
-            <span>Pitch Type</span>
-            <input
-              value={pitchType}
-              placeholder="Example: Sinker"
-              onChange={(event) => setPitchType(event.target.value)}
-            />
-          </label>
+          <PitchTypeDropdown
+            value={pitchType}
+            onChange={setPitchType}
+            pitchTypes={filterOptions?.pitch_types ?? []}
+          />
         </div>
 
         <div className="filter-actions">
